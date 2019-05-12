@@ -1,9 +1,17 @@
 #! /usr/bin/env python
-# encoding: windows-1250
-#
-# Res Andy 
 
-import os, re, sys, time, socket
+import re
+import time
+import socket
+
+
+DEBUG = True
+
+
+def dPrint(*param):
+    if DEBUG:
+        print(*param)
+
 
 class Yi:
     '''Class to access functionalities of the xiaomi yi action camera
@@ -28,21 +36,21 @@ class Yi:
         '''Connect to the camera to get a token
         '''
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((self.ip, self.port))
-            self.sock = sock
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.ip, self.port))
         except:
             print('Could not connect to camera at: {}:{}'.format(
+                self.ip, self.port))
+
+        if self.sock is None:
+            raise ValueError('Could not connect to camera at: {}:{}'.format(
                 self.ip, self.port))
 
         self.token = 0
         self.sock.settimeout(1)
 
         self.send_code(257)
-        while True:
-            data = self.get_buffer()
-            if 'rval' in data:
-                break
+        data = self.get_buffer(expect='"rval": 0')
         self.token = re.findall('"param": (.+) }', data)[0]
 
     def send_code(self, code, param=None):
@@ -53,24 +61,30 @@ class Yi:
             msg += ', "param": "{}"'.format(param)
         msg += '}}'
         self.sock.send(msg.encode('utf-8'))
-        print('sent:', msg)
 
-    def get_buffer(self, wait_time=2):
+        dPrint('sent:', msg)
+
+    def get_buffer(self, wait_time=2, buffer_size=4096, expect=''):
         '''
         Params:
             wait_time (int): wait 2 seconds for an answer max
+            expect (str): an string expected in the buffer
         '''
         data = None
         start = time.time()
-        while (data == None) and ((time.time() - start)  < wait_time):
+        while ((data is None)
+               and ((time.time() - start) < wait_time)):
             try:
-                data = str(self.sock.recv(4096))
-                print('recieved: ', data)
-                return data
+                data = str(self.sock.recv(buffer_size))[2:-1]
+                if expect in data:
+                    dPrint('recieved: ', data)
+                    return data
+                else:
+                    data = None
             except:
                 time.sleep(0.4)
         print('nothing in buffer')
-        
+
     def take_picture(self):
         self.send_code(769)
         for _ in range(5):
@@ -91,8 +105,32 @@ class Yi:
         time.sleep(duration)
         self.grab_video_stop()
 
-cam = Yi()
-cam.take_picture()
-cam.grab_video(3)
-cam.take_picture()
-print(cam)
+    def get_configuration(self):
+        '''Output the configuration of the camera
+        '''
+        self.send_code(3)
+
+        data = self.get_buffer(expect='"rval": 0')
+        if not data.endswith('} ] }'):
+            data += self.get_buffer()
+
+        data = eval(data)
+        conf = {}
+        for d in data['param']:
+            k, v = list(d.items())[0]
+            conf[k] = v
+        return conf
+
+    def show_configuration(self):
+        conf = self.get_configuration()
+        for k, v in conf.items():
+            print(k, ' -- ', v)
+
+
+if __name__ == '__main__':
+    cam = Yi()
+    cam.take_picture()
+    # cam.grab_video(3)
+    # cam.take_picture()
+    # cam.show_configuration()
+    print(cam)
